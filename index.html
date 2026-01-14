@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <!-- Viewport fit=cover allows the app to extend into the notch area on iPhones -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    
+    <!-- PWA / Native App Meta Tags -->
+    <meta name="theme-color" content="#0f172a">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    
+    <title>Pathfinder Tracker</title>
+    
+    <!-- Import Inter Font -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --primary: #6366f1;     /* Indigo */
+            --active: #ec4899;      /* Pink */
+            --bg: #0f172a;          /* Slate 900 */
+            --surface: rgba(30, 41, 59, 0.7); /* Slate 800 with opacity */
+            --text: #f8fafc;
+            --text-dim: #94a3b8;
+            --safe-area-top: env(safe-area-inset-top, 20px);
+            --safe-area-bottom: env(safe-area-inset-bottom, 20px);
+        }
+
+        * {
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            margin: 0;
+            height: 100vh;
+            width: 100vw;
+            overflow: hidden;
+            background-color: var(--bg);
+            font-family: 'Inter', sans-serif;
+            color: var(--text);
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* --- Canvas Layer --- */
+        #world {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+
+        /* --- UI Layer --- */
+        .ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            pointer-events: none; /* Let touches pass through to canvas if needed */
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        /* Top Bar / HUD */
+        .hud-header {
+            padding: calc(var(--safe-area-top) + 16px) 24px 16px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: linear-gradient(180deg, rgba(15,23,42,0.95) 0%, rgba(15,23,42,0) 100%);
+        }
+
+        .stats-group {
+            display: flex;
+            gap: 24px;
+        }
+
+        .stat-item {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .stat-label {
+            font-size: 0.7rem;
+            font-weight: 600;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 2px;
+        }
+
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: 800;
+            line-height: 1;
+            font-variant-numeric: tabular-nums;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+        }
+
+        .unit {
+            font-size: 0.9rem;
+            color: var(--text-dim);
+            font-weight: 600;
+        }
+
+        /* Compass Widget */
+        .compass-widget {
+            position: relative;
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background: var(--surface);
+            border: 1px solid rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            transition: transform 0.1s linear;
+        }
+
+        .compass-arrow {
+            width: 0; 
+            height: 0; 
+            border-left: 6px solid transparent;
+            border-right: 6px solid transparent;
+            border-bottom: 16px solid var(--active);
+            position: absolute;
+            top: 8px;
+        }
+        
+        .compass-n {
+            position: absolute;
+            top: -16px;
+            font-size: 0.7rem;
+            font-weight: 800;
+            color: var(--active);
+        }
+
+        /* Bottom Controls Container */
+        .controls-container {
+            padding: 0 24px calc(var(--safe-area-bottom) + 30px) 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 20px;
+            pointer-events: auto; /* Re-enable clicks */
+            background: linear-gradient(0deg, rgba(15,23,42,1) 0%, rgba(15,23,42,0) 100%);
+        }
+
+        /* Main Toggle Button (FAB style) */
+        .btn-main {
+            width: 72px;
+            height: 72px;
+            border-radius: 50%;
+            border: none;
+            background: var(--primary);
+            color: white;
+            box-shadow: 0 8px 24px rgba(99, 102, 241, 0.4);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            position: relative;
+        }
+
+        .btn-main:active {
+            transform: scale(0.9);
+        }
+
+        .btn-main.tracking {
+            background: var(--active);
+            box-shadow: 0 8px 24px rgba(236, 72, 153, 0.4);
+        }
+
+        /* Icon inside button (CSS only) */
+        .icon-play, .icon-stop {
+            width: 20px;
+            height: 20px;
+            background: white;
+            transition: all 0.2s ease;
+        }
+
+        .icon-play {
+            clip-path: polygon(10% 0, 100% 50%, 10% 100%);
+            margin-left: 4px; /* Optical centering */
+        }
+
+        .btn-main.tracking .icon-play {
+            clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%);
+            margin-left: 0;
+            width: 18px;
+            height: 18px;
+            border-radius: 2px;
+        }
+
+        /* Reset Button (pill style) */
+        .btn-reset {
+            padding: 12px 20px;
+            border-radius: 12px;
+            background: var(--surface);
+            border: 1px solid rgba(255,255,255,0.05);
+            color: var(--text-dim);
+            font-weight: 600;
+            font-size: 0.9rem;
+            cursor: pointer;
+            backdrop-filter: blur(10px);
+            transition: all 0.2s;
+            position: absolute;
+            left: 24px;
+        }
+
+        .btn-reset:active {
+            background: rgba(255,255,255,0.1);
+            color: white;
+        }
+
+        /* Debug Hint */
+        .debug-hint {
+            position: absolute;
+            bottom: 120px;
+            width: 100%;
+            text-align: center;
+            font-size: 0.75rem;
+            color: rgba(255,255,255,0.2);
+            pointer-events: none;
+        }
+
+        /* Pulse Animation for tracking */
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(236, 72, 153, 0.4); }
+            70% { box-shadow: 0 0 0 15px rgba(236, 72, 153, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(236, 72, 153, 0); }
+        }
+        
+        .btn-main.tracking {
+            animation: pulse 2s infinite;
+        }
+
+    </style>
+</head>
+<body>
+
+    <!-- Canvas Layer -->
+    <canvas id="world"></canvas>
+
+    <!-- UI Overlay -->
+    <div class="ui-layer">
+        
+        <!-- Top HUD -->
+        <div class="hud-header">
+            <div class="stats-group">
+                <div class="stat-item">
+                    <span class="stat-label">Steps</span>
+                    <span class="stat-value" id="val-steps">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Distance</span>
+                    <span class="stat-value">
+                        <span id="val-dist">0.0</span><span class="unit">m</span>
+                    </span>
+                </div>
+            </div>
+
+            <div class="compass-widget" id="compass-widget">
+                <div class="compass-n">N</div>
+                <div class="compass-arrow"></div>
+            </div>
+        </div>
+
+        <div class="debug-hint">
+            Tap circle to Start • Use PC Arrow Keys to Debug
+        </div>
+
+        <!-- Bottom Controls -->
+        <div class="controls-container">
+            <button class="btn-reset" id="btn-reset">Reset</button>
+            <button class="btn-main" id="btn-toggle" aria-label="Start Tracking">
+                <div class="icon-play"></div>
+            </button>
+        </div>
+    </div>
+
+    <script>
+        /**
+         * CONFIGURATION
+         */
+        const CONFIG = {
+            stepThreshold: 12,    // Sensitivity for accelerometer (Lower = more sensitive)
+            stepCooldown: 350,    // Min ms between steps to prevent double-counting
+            stepLength: 0.7,      // Meters per step (average human stride)
+            pathColor: '#6366f1',
+            gridColor: 'rgba(255, 255, 255, 0.05)',
+            smoothing: 0.85       // For compass smoothing (0-1). Higher = smoother but laggy
+        };
+
+        /**
+         * STATE MANAGEMENT
+         */
+        const state = {
+            tracking: false,
+            steps: 0,
+            path: [{x: 0, y: 0}], // Path relative to start (0,0)
+            heading: 0,           // Current heading in degrees
+            lastStepTime: 0,
+            lastAccel: { x:0, y:0, z:0, mag: 0 }
+        };
+
+        /**
+         * DOM ELEMENTS
+         */
+        const canvas = document.getElementById('world');
+        const ctx = canvas.getContext('2d');
+        const btnToggle = document.getElementById('btn-toggle');
+        const btnReset = document.getElementById('btn-reset');
+        const elSteps = document.getElementById('val-steps');
+        const elDist = document.getElementById('val-dist');
+        const elCompass = document.getElementById('compass-widget');
+
+        /**
+         * INITIALIZATION & RESIZING
+         */
+        function resize() {
+            // Handle high DPI displays (Retina)
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = window.innerWidth * dpr;
+            canvas.height = window.innerHeight * dpr;
+            ctx.scale(dpr, dpr);
+            
+            // Re-draw immediately
+            draw();
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        /**
+         * SENSOR LOGIC
+         */
+        
+        function handleOrientation(event) {
+            if (!state.tracking) return;
+
+            let heading = 0;
+
+            // iOS Webkit standard
+            if (event.webkitCompassHeading) {
+                heading = event.webkitCompassHeading;
+            } 
+            // Android/Standard
+            else if (event.alpha) {
+                heading = 360 - event.alpha;
+            }
+
+            // Smoothing Logic
+            const current = state.heading;
+            let diff = heading - current;
+
+            // Handle wrap-around (e.g. going from 359 to 1)
+            if (diff > 180) diff -= 360;
+            if (diff < -180) diff += 360;
+
+            state.heading = current + (diff * (1 - CONFIG.smoothing));
+            
+            // Normalize back to 0-360
+            if (state.heading >= 360) state.heading -= 360;
+            if (state.heading < 0) state.heading += 360;
+
+            // Rotate the entire compass widget visually
+            // We rotate negatively so 'N' points to actual North relative to screen
+            elCompass.style.transform = `rotate(${-state.heading}deg)`;
+        }
+
+        function handleMotion(event) {
+            if (!state.tracking) return;
+            
+            const acc = event.accelerationIncludingGravity || event.acceleration;
+            if (!acc) return;
+
+            // Magnitude = sqrt(x^2 + y^2 + z^2)
+            const magnitude = Math.sqrt(acc.x*acc.x + acc.y*acc.y + acc.z*acc.z);
+
+            // Delta from previous frame
+            const delta = Math.abs(magnitude - state.lastAccel.mag);
+            const now = Date.now();
+
+            // Step Detection
+            if (delta > CONFIG.stepThreshold && (now - state.lastStepTime > CONFIG.stepCooldown)) {
+                registerStep();
+                state.lastStepTime = now;
+            }
+
+            state.lastAccel = { x: acc.x, y: acc.y, z: acc.z, mag: magnitude };
+        }
+
+        /**
+         * CORE LOGIC
+         */
+        function registerStep() {
+            state.steps++;
+            
+            // Convert heading to Radians
+            // Canvas coords: Y is Down, X is Right. 
+            // Compass: 0 is Up (North).
+            const rad = (state.heading * Math.PI) / 180;
+            
+            // 20 pixels = 1 step visual scale
+            const dX = Math.sin(rad) * 20;
+            const dY = -Math.cos(rad) * 20;
+
+            const lastPos = state.path[state.path.length - 1];
+            
+            const newPos = {
+                x: lastPos.x + dX,
+                y: lastPos.y + dY
+            };
+
+            state.path.push(newPos);
+            updateStats();
+            draw();
+        }
+
+        function updateStats() {
+            elSteps.textContent = state.steps;
+            const dist = (state.steps * CONFIG.stepLength).toFixed(1);
+            elDist.textContent = dist;
+        }
+
+        /**
+         * RENDERING
+         */
+        function draw() {
+            // Screen dimensions (divided by DPR because we scaled context)
+            const width = canvas.width / (window.devicePixelRatio || 1);
+            const height = canvas.height / (window.devicePixelRatio || 1);
+
+            // Clear
+            ctx.fillStyle = '#0f172a';
+            ctx.fillRect(0, 0, width, height);
+
+            const centerX = width / 2;
+            const centerY = height / 2;
+
+            const player = state.path[state.path.length - 1];
+            const offsetX = centerX - player.x;
+            const offsetY = centerY - player.y;
+
+            ctx.save();
+            ctx.translate(offsetX, offsetY);
+
+            // 1. Grid
+            drawGrid(player.x, player.y, width, height);
+
+            // 2. Start Marker
+            ctx.fillStyle = 'rgba(71, 85, 105, 0.5)';
+            ctx.beginPath();
+            ctx.arc(0, 0, 12, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#94a3b8';
+            ctx.font = '600 10px Inter, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText("START", 0, 4);
+
+            // 3. Path
+            if (state.path.length > 1) {
+                // Outer Glow
+                ctx.shadowBlur = 10;
+                ctx.shadowColor = CONFIG.pathColor;
+                
+                ctx.strokeStyle = CONFIG.pathColor;
+                ctx.lineWidth = 4;
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+                ctx.beginPath();
+                ctx.moveTo(state.path[0].x, state.path[0].y);
+                for (let i = 1; i < state.path.length; i++) {
+                    ctx.lineTo(state.path[i].x, state.path[i].y);
+                }
+                ctx.stroke();
+                
+                // Reset shadow for other elements
+                ctx.shadowBlur = 0;
+            }
+
+            // 4. Player Marker
+            ctx.fillStyle = '#ec4899'; // Pink active color
+            ctx.beginPath();
+            ctx.arc(player.x, player.y, 8, 0, Math.PI * 2);
+            ctx.fill();
+
+            // 5. Directional Cone (Flashlight effect)
+            ctx.save();
+            ctx.translate(player.x, player.y);
+            ctx.rotate((state.heading * Math.PI) / 180); // Rotate context to heading
+            
+            // Gradient cone
+            const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, 60);
+            gradient.addColorStop(0, 'rgba(236, 72, 153, 0.3)');
+            gradient.addColorStop(1, 'rgba(236, 72, 153, 0)');
+            
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            // Draw cone facing "Up" relative to rotation (which is -Y)
+            ctx.arc(0, 0, 60, -Math.PI/2 - 0.5, -Math.PI/2 + 0.5);
+            ctx.fill();
+            
+            ctx.restore(); // Undo rotation
+            ctx.restore(); // Undo translation
+        }
+
+        function drawGrid(px, py, w, h) {
+            const gridSize = 50;
+            const left = px - w/2;
+            const right = px + w/2;
+            const top = py - h/2;
+            const bottom = py + h/2;
+
+            ctx.strokeStyle = CONFIG.gridColor;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+
+            const startX = Math.floor(left / gridSize) * gridSize;
+            const startY = Math.floor(top / gridSize) * gridSize;
+
+            for (let x = startX; x < right; x += gridSize) {
+                ctx.moveTo(x, top);
+                ctx.lineTo(x, bottom);
+            }
+            for (let y = startY; y < bottom; y += gridSize) {
+                ctx.moveTo(left, y);
+                ctx.lineTo(right, y);
+            }
+            ctx.stroke();
+        }
+
+        /**
+         * CONTROLS & PERMISSIONS
+         */
+        async function toggleTracking() {
+            if (state.tracking) {
+                // Stop
+                state.tracking = false;
+                btnToggle.classList.remove('tracking');
+                // Remove listeners
+                window.removeEventListener('deviceorientation', handleOrientation);
+                window.removeEventListener('devicemotion', handleMotion);
+            } else {
+                // Start - Permission Sequence
+                if (typeof DeviceOrientationEvent !== 'undefined' && 
+                    typeof DeviceOrientationEvent.requestPermission === 'function') {
+                    try {
+                        const response = await DeviceOrientationEvent.requestPermission();
+                        if (response !== 'granted') {
+                            alert('Permission needed to track heading.');
+                            return;
+                        }
+                    } catch (e) { console.error(e); }
+                }
+                
+                if (typeof DeviceMotionEvent !== 'undefined' &&
+                    typeof DeviceMotionEvent.requestPermission === 'function') {
+                        try { await DeviceMotionEvent.requestPermission(); } catch(e){}
+                }
+
+                state.tracking = true;
+                btnToggle.classList.add('tracking');
+                
+                window.addEventListener('deviceorientation', handleOrientation);
+                window.addEventListener('devicemotion', handleMotion);
+            }
+        }
+
+        function resetTracker() {
+            state.steps = 0;
+            state.path = [{x: 0, y: 0}];
+            state.tracking = false;
+            btnToggle.classList.remove('tracking');
+            window.removeEventListener('deviceorientation', handleOrientation);
+            window.removeEventListener('devicemotion', handleMotion);
+            updateStats();
+            draw();
+            // Reset compass visual
+            elCompass.style.transform = `rotate(0deg)`;
+        }
+
+        btnToggle.addEventListener('click', toggleTracking);
+        btnReset.addEventListener('click', resetTracker);
+
+        /**
+         * DESKTOP DEBUGGING
+         */
+        window.addEventListener('keydown', (e) => {
+            if (e.key.includes('Arrow')) {
+                if (!state.tracking) {
+                    state.tracking = true;
+                    btnToggle.classList.add('tracking');
+                }
+                
+                const turnSpeed = 15;
+                if (e.key === 'ArrowUp') registerStep();
+                if (e.key === 'ArrowLeft') state.heading = (state.heading - turnSpeed + 360) % 360;
+                if (e.key === 'ArrowRight') state.heading = (state.heading + turnSpeed) % 360;
+
+                // Manually trigger visual update for compass since event listener isn't running
+                elCompass.style.transform = `rotate(${-state.heading}deg)`;
+                draw();
+            }
+        });
+
+        draw();
+
+    </script>
+</body>
+</html>
